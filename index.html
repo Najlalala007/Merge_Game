@@ -1,0 +1,594 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#eadcf7">
+<title>Nana Merge - Sleepy Edition</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: linear-gradient(145deg, #fce8f1, #e9ddf8, #dcd6f4);
+  font-family: Georgia, serif;
+  color: #786585;
+}
+
+.game {
+  width: min(100%, 440px);
+  padding: 16px;
+  text-align: center;
+}
+
+h1 {
+  color: #b58bbf;
+  font-size: 30px;
+  margin: 5px;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #a28eae;
+  margin: 5px 0 16px;
+}
+
+.panel {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: rgba(255,255,255,.55);
+  border: 1px solid rgba(255,255,255,.8);
+  border-radius: 16px;
+  margin-bottom: 10px;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 3px solid rgba(255,255,255,.9);
+  border-radius: 20px;
+  background: linear-gradient(#eee4fa, #fceaf3);
+  box-shadow: 0 8px 25px rgba(150,115,175,.12);
+  touch-action: none;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+button {
+  border: 1px solid white;
+  border-radius: 24px;
+  background: #d9c5eb;
+  color: #725b83;
+  padding: 11px 17px;
+  margin-top: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button:hover { background: #ead5ed; }
+
+#message {
+  min-height: 24px;
+  font-size: 13px;
+  margin-top: 10px;
+}
+
+.footer {
+  font-size: 11px;
+  color: #aa91b5;
+  margin-top: 12px;
+}
+</style>
+</head>
+
+<body>
+<div class="game">
+
+<h1>☾ Nana Merge ♡</h1>
+<p class="subtitle">A little sleepy world made for Remi</p>
+
+<div class="panel">
+  <span>♡ Score: <b id="score">0</b></span>
+  <span>Next: <b id="next">1</b></span>
+</div>
+
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+
+<div id="message">Tap anywhere to drop Nana ☁</div>
+
+<div class="controls">
+  <button id="musicButton">♫ Music: OFF</button>
+  <button id="soundButton">♪ Sound: ON</button>
+  <button onclick="restartGame()">↻ Restart</button>
+</div>
+
+<p class="footer">Made with love, just for you ♡</p>
+</div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+const scoreEl = document.getElementById("score");
+const nextEl = document.getElementById("next");
+const message = document.getElementById("message");
+
+const W = 400;
+const H = 600;
+const WALL = 18;
+const FLOOR = 582;
+const DANGER = 100;
+
+// 11 TYPES OF NANA
+const levels = [
+ {r:15,  c:"#f9cde2", n:"Mini Nana",     img:"nana1.png"},
+ {r:22,  c:"#f4bddd", n:"Baby Nana",     img:"nana2.png"},
+ {r:30,  c:"#eac5ec", n:"Cute Nana",     img:"nana3.png"},
+ {r:39,  c:"#d9b9ed", n:"Sweet Nana",    img:"nana4.png"},
+ {r:49,  c:"#cbb9ed", n:"Lovely Nana",   img:"nana5.png"},
+ {r:60,  c:"#bcaee5", n:"Dreamy Nana",   img:"nana6.png"},
+ {r:72,  c:"#b5a2d9", n:"Big Nana",      img:"nana7.png"},
+ {r:85,  c:"#a58dc8", n:"Super Nana",    img:"nana8.png"},
+ {r:98,  c:"#9d8bc9", n:"Giant Nana",    img:"nana9.png"},
+ {r:112, c:"#927fbd", n:"Mega Nana",     img:"nana10.png"},
+ {r:127, c:"#806da9", n:"Ultimate Nana",img:"nana11.png"}
+];
+
+const nanaImages = levels.map(level => {
+ const img = new Image();
+ img.src = "photos/" + level.img;
+ return img;
+});
+
+let balls = [];
+let score = 0;
+let nextLevel = 0;
+let dropX = 200;
+let canDrop = true;
+let gameOver = false;
+let dangerTimer = 0;
+let lastTime = 0;
+let particles = [];
+
+let soundEnabled = true;
+let musicEnabled = false;
+let audioCtx = null;
+let musicTimer = null;
+let musicStep = 0;
+
+const stars = Array.from({length:55}, () => ({
+ x:Math.random()*W,
+ y:Math.random()*H,
+ size:Math.random()*2+0.5,
+ phase:Math.random()*6.28
+}));
+
+function audio() {
+ if (!audioCtx) {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+ }
+ if (audioCtx.state === "suspended") audioCtx.resume();
+ return audioCtx;
+}
+
+function tone(freq, duration, volume, type="sine", delay=0) {
+ if (!soundEnabled) return;
+
+ const ac = audio();
+ const osc = ac.createOscillator();
+ const gain = ac.createGain();
+
+ osc.type = type;
+ osc.frequency.setValueAtTime(freq, ac.currentTime+delay);
+ gain.gain.setValueAtTime(0, ac.currentTime+delay);
+ gain.gain.linearRampToValueAtTime(volume, ac.currentTime+delay+0.02);
+ gain.gain.exponentialRampToValueAtTime(
+  0.001, ac.currentTime+delay+duration
+ );
+
+ osc.connect(gain);
+ gain.connect(ac.destination);
+ osc.start(ac.currentTime+delay);
+ osc.stop(ac.currentTime+delay+duration);
+}
+
+function playDrop() {
+ tone(330, .16, .045, "sine");
+}
+
+function playMerge(level) {
+ const base = 440 + level*55;
+ tone(base, .5, .055, "sine");
+ tone(base*1.25, .65, .035, "sine", .08);
+ tone(base*1.5, .7, .025, "sine", .16);
+}
+
+function startMusic() {
+ if (musicTimer) return;
+ audio();
+ musicEnabled = true;
+ document.getElementById("musicButton").textContent = "♫ Music: ON";
+
+ // Gentle original ambient arpeggio
+ const notes = [261.63, 329.63, 392, 329.63, 293.66, 349.23, 440, 349.23];
+
+ musicTimer = setInterval(() => {
+  if (!musicEnabled) return;
+  const note = notes[musicStep % notes.length];
+  musicStep++;
+  const ac = audio();
+  const osc = ac.createOscillator();
+  const gain = ac.createGain();
+
+  osc.type = "sine";
+  osc.frequency.value = note;
+  gain.gain.setValueAtTime(.0001, ac.currentTime);
+  gain.gain.linearRampToValueAtTime(.012, ac.currentTime+.3);
+  gain.gain.exponentialRampToValueAtTime(.0001, ac.currentTime+2);
+
+  osc.connect(gain);
+  gain.connect(ac.destination);
+  osc.start();
+  osc.stop(ac.currentTime+2);
+ }, 1400);
+}
+
+function stopMusic() {
+ musicEnabled = false;
+ if (musicTimer) clearInterval(musicTimer);
+ musicTimer = null;
+ document.getElementById("musicButton").textContent = "♫ Music: OFF";
+}
+
+document.getElementById("musicButton").onclick = () => {
+ if (musicEnabled) stopMusic();
+ else startMusic();
+};
+
+document.getElementById("soundButton").onclick = () => {
+ soundEnabled = !soundEnabled;
+ document.getElementById("soundButton").textContent =
+  soundEnabled ? "♪ Sound: ON" : "♪ Sound: OFF";
+};
+
+function randomNext() {
+ return Math.floor(Math.random()*4);
+}
+
+function makeBall(x,y,level) {
+ return {
+  x,y,vx:0,vy:0,
+  level,
+  r:levels[level].r,
+  lock:0
+ };
+}
+
+function dropBall(x) {
+ if (!canDrop || gameOver) return;
+
+ const r = levels[nextLevel].r;
+ x = Math.max(WALL+r,Math.min(W-WALL-r,x));
+
+ const blocked = balls.some(b =>
+  Math.hypot(b.x-x,b.y-35)<b.r+r
+ );
+
+ if (blocked) return;
+
+ balls.push(makeBall(x,35,nextLevel));
+ playDrop();
+
+ canDrop = false;
+ setTimeout(()=>canDrop=true,450);
+
+ nextLevel = randomNext();
+ updateUI();
+}
+
+function updateUI() {
+ scoreEl.textContent = score;
+ nextEl.textContent = nextLevel+1;
+}
+
+function addParticles(x,y) {
+ for(let i=0;i<12;i++) {
+  const angle=Math.random()*Math.PI*2;
+  const speed=1+Math.random()*2;
+  particles.push({
+   x,y,
+   vx:Math.cos(angle)*speed,
+   vy:Math.sin(angle)*speed,
+   life:1,
+   size:2+Math.random()*3
+  });
+ }
+}
+
+function merge(a,b) {
+ const level=a.level+1;
+ if(level>=levels.length) return false;
+
+ const x=(a.x+b.x)/2;
+ const y=(a.y+b.y)/2;
+
+ a.remove=true;
+ b.remove=true;
+
+ const ball=makeBall(x,y,level);
+ ball.vy=-1;
+ ball.lock=12;
+ balls.push(ball);
+
+ score+=(level+1)*10;
+ addParticles(x,y);
+ playMerge(level);
+
+ message.textContent = level === levels.length - 1
+   ? "👑 You found Ultimate Nana! ♡"
+   : "✨ " + levels[level].n + " ✨";
+
+ updateUI();
+ return true;
+}
+
+function physics(dt) {
+ for(const b of balls) {
+  b.lock=Math.max(0,b.lock-dt);
+  b.vy+=.30*dt;
+  b.x+=b.vx*dt;
+  b.y+=b.vy*dt;
+  b.vx*=Math.pow(.995,dt);
+  b.vy*=Math.pow(.999,dt);
+
+  if(b.x-b.r<WALL) {
+   b.x=WALL+b.r;
+   b.vx=Math.abs(b.vx)*.4;
+  }
+
+  if(b.x+b.r>W-WALL) {
+   b.x=W-WALL-b.r;
+   b.vx=-Math.abs(b.vx)*.4;
+  }
+
+  if(b.y+b.r>FLOOR) {
+   b.y=FLOOR-b.r;
+   b.vy=-Math.abs(b.vy)*.3;
+   if(Math.abs(b.vy)<.6)b.vy=0;
+  }
+ }
+
+ const merging=new Set();
+
+ for(let i=0;i<balls.length;i++) {
+  const a=balls[i];
+  if(a.remove||merging.has(a))continue;
+
+  for(let j=i+1;j<balls.length;j++) {
+   const b=balls[j];
+   if(b.remove||merging.has(b))continue;
+
+   let dx=b.x-a.x;
+   let dy=b.y-a.y;
+   let d=Math.hypot(dx,dy);
+   const min=a.r+b.r;
+
+   if(d>=min)continue;
+   if(d===0){dx=.01;d=.01;}
+
+   // Final level cannot merge any further
+   if(a.level===b.level&&a.level<levels.length-1&&a.lock<=0&&b.lock<=0) {
+    merging.add(a);
+    merging.add(b);
+    merge(a,b);
+    break;
+   }
+
+   const nx=dx/d;
+   const ny=dy/d;
+   const overlap=min-d;
+
+   a.x-=nx*overlap*.5;
+   a.y-=ny*overlap*.5;
+   b.x+=nx*overlap*.5;
+   b.y+=ny*overlap*.5;
+
+   const rel=(b.vx-a.vx)*nx+(b.vy-a.vy)*ny;
+
+   if(rel<0) {
+    const impulse=-(1+.25)*rel/2;
+    a.vx-=impulse*nx;
+    a.vy-=impulse*ny;
+    b.vx+=impulse*nx;
+    b.vy+=impulse*ny;
+   }
+  }
+ }
+
+ balls=balls.filter(b=>!b.remove);
+
+ for(const p of particles) {
+  p.x+=p.vx*dt;
+  p.y+=p.vy*dt;
+  p.life-=.025*dt;
+ }
+
+ particles=particles.filter(p=>p.life>0);
+
+ const danger=balls.some(b=>b.y-b.r<DANGER);
+ dangerTimer=danger?dangerTimer+dt:0;
+
+ if(dangerTimer>120) {
+  gameOver=true;
+  message.textContent="Rest well, Remi ♡";
+ }
+}
+
+function drawBackground(time) {
+ const gradient=ctx.createLinearGradient(0,0,0,H);
+ gradient.addColorStop(0,"#e7ddf7");
+ gradient.addColorStop(1,"#fceaf2");
+ ctx.fillStyle=gradient;
+ ctx.fillRect(0,0,W,H);
+
+ // Moon
+ ctx.fillStyle="#fff9f2";
+ ctx.beginPath();
+ ctx.arc(325,65,24,0,Math.PI*2);
+ ctx.fill();
+
+ ctx.fillStyle="#e7ddf7";
+ ctx.beginPath();
+ ctx.arc(337,55,21,0,Math.PI*2);
+ ctx.fill();
+
+ // Twinkling stars
+ stars.forEach(s=>{
+  const alpha=.35+.45*Math.sin(time*.001+s.phase);
+  ctx.globalAlpha=alpha;
+  ctx.fillStyle="#fff";
+  ctx.beginPath();
+  ctx.arc(s.x,s.y,s.size,0,Math.PI*2);
+  ctx.fill();
+ });
+
+ ctx.globalAlpha=1;
+}
+
+
+function drawBall(b) {
+  const img = nanaImages[b.level];
+
+  if (img && img.complete && img.naturalWidth > 0) {
+    const size = b.r * 2.3;
+    const scale = size / Math.max(img.naturalWidth, img.naturalHeight);
+    const w = img.naturalWidth * scale;
+    const h = img.naturalHeight * scale;
+
+    ctx.drawImage(
+      img,
+      b.x - w / 2,
+      b.y - h / 2,
+      w,
+      h
+    );
+  }
+}
+
+function draw(time) {
+ drawBackground(time);
+
+ ctx.setLineDash([5,7]);
+ ctx.strokeStyle="rgba(255,255,255,.8)";
+ ctx.beginPath();
+ ctx.moveTo(WALL,DANGER);
+ ctx.lineTo(W-WALL,DANGER);
+ ctx.stroke();
+ ctx.setLineDash([]);
+
+ ctx.fillStyle="rgba(255,255,255,.45)";
+ ctx.fillRect(0,0,WALL,H);
+ ctx.fillRect(W-WALL,0,WALL,H);
+ ctx.fillRect(0,FLOOR,W,H-FLOOR);
+
+if(!gameOver) {
+  const img = nanaImages[nextLevel];
+  const r = levels[nextLevel].r;
+
+  ctx.globalAlpha = 0.45;
+
+  if(img.complete && img.naturalWidth > 0) {
+    const scale = (r * 2.3) /
+      Math.max(img.naturalWidth, img.naturalHeight);
+
+    const width = img.naturalWidth * scale;
+    const height = img.naturalHeight * scale;
+
+    ctx.drawImage(
+      img,
+      dropX - width / 2,
+      35 - height / 2,
+      width,
+      height
+    );
+  }
+
+  ctx.globalAlpha = 1;
+}
+
+ balls.forEach(drawBall);
+
+ particles.forEach(p=>{
+  ctx.globalAlpha=p.life;
+  ctx.fillStyle="#fff9ff";
+  ctx.beginPath();
+  ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+  ctx.fill();
+ });
+
+ ctx.globalAlpha=1;
+
+ if(gameOver) {
+  ctx.fillStyle="rgba(245,231,249,.85)";
+  ctx.fillRect(0,0,W,H);
+  ctx.fillStyle="#a58dc8";
+  ctx.font="bold 32px Georgia";
+  ctx.textAlign="center";
+  ctx.fillText("Sweet Dreams ♡",W/2,H/2);
+ }
+}
+
+function getX(event) {
+ const rect=canvas.getBoundingClientRect();
+ return (event.clientX-rect.left)*W/rect.width;
+}
+
+canvas.addEventListener("pointermove",e=>{
+ dropX=getX(e);
+});
+
+canvas.addEventListener("pointerdown",e=>{
+ e.preventDefault();
+ dropBall(getX(e));
+});
+
+function restartGame() {
+ balls=[];
+ particles=[];
+ score=0;
+ nextLevel=randomNext();
+ canDrop=true;
+ gameOver=false;
+ dangerTimer=0;
+ message.textContent="Tap anywhere to drop Nana ☁";
+ updateUI();
+}
+
+function loop(time) {
+ const dt=lastTime?Math.min((time-lastTime)/16.67,2):1;
+ lastTime=time;
+
+ if(!gameOver)physics(dt);
+ draw(time);
+
+ requestAnimationFrame(loop);
+}
+
+restartGame();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
